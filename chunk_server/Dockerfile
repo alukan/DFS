@@ -7,11 +7,29 @@ WORKDIR /app
 # Copy the current directory contents into the container
 COPY . .
 
+# Copy the cleanup script into the container
+COPY cleanup.sh /usr/local/bin/cleanup.sh
+
 # Install any needed packages specified in requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Install cron
+RUN apt-get update && apt-get install -y cron
+
+# Give execution rights on the cleanup script
+RUN chmod +x /usr/local/bin/cleanup.sh
+
+# Create the cron job
+RUN echo "*/10 * * * * /usr/local/bin/cleanup.sh" > /etc/cron.d/cleanup-cron
+
+# Give execution rights on the cron job file
+RUN chmod 0644 /etc/cron.d/cleanup-cron
+
+# Apply the cron job
+RUN crontab /etc/cron.d/cleanup-cron
 
 # Expose the port (no specific port hardcoded)
 EXPOSE ${PORT}
 
-# Run chunk_server_app.py when the container launches
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port $PORT"]
+# Start cron and the application
+CMD cron && uvicorn app.main:app --host 0.0.0.0 --port $PORT
