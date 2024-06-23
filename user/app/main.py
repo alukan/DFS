@@ -117,11 +117,42 @@ async def get_name_mapping(full_path: str):
     else:
         raise HTTPException(status_code=response.status_code, detail="Error getting name mapping")
 
+
+async def delete_chunks_from_servers(session, chunk_servers, chunk_hashes):
+    for chunk_hash in chunk_hashes:
+        servers = get_chunk_server_positions(chunk_hash[0], chunk_servers)
+        for server in servers:
+            url = f"{server['url']}/delete_chunks/"
+            async with session.post(url, json={"chunks": [chunk_hash[0]]}) as response:
+                if response.status != 200:
+                    raise HTTPException(status_code=response.status, detail=f"Failed to delete chunk {chunk_hash[0]} on server {server['url']}")
+
+
 @app.delete("/namemappings/{full_path:path}")
-async def delete_name_mapping(full_path: str):
+async def delete_name_mapping(full_path: str, db: Session = Depends(get_db)):
+    # Get chunk information from the leader
+    response = requests.get(f"{LEADER_URL}/namemappings/{full_path}")
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail="Error fetching file info")
+
+    file_info = response.json()
+    chunk_hashes = file_info['chunk_hashes']
+
+    # Get the list of chunk servers
+    response = requests.get(f"{LEADER_URL}/chunk_servers/")
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail="Error fetching chunk servers info")
+
+    chunk_servers = response.json()
+
+    # Delete chunks from the servers
+    async with aiohttp.ClientSession() as session:
+        await delete_chunks_from_servers(session, chunk_servers, chunk_hashes)
+
+    # Delete the name mapping from the leader
     response = requests.delete(f"{LEADER_URL}/namemappings/{full_path}")
     if response.status_code == 200:
-        return {"message": "Name deleted successfully"}
+        return {"message": "Name and associated chunks deleted successfully"}
     else:
         raise HTTPException(status_code=response.status_code, detail="Error deleting name mapping")
 
