@@ -25,7 +25,7 @@ async def rename_name_mapping(
     else:
         raise HTTPException(status_code=response.status, detail="Error renaming name mapping")
 
-@router.get("/listfiles/", response_model=List[Dict])
+@router.get("/listfiles/")
 async def list_files_in_folder(folder_path: str = Query(..., description="The path of the folder to list files from")):
     params = {'folder_path': folder_path}
     response = requests.get(f"{os.getenv('LEADER_URL')}/listfiles/", params=params)
