@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Tuple
 
 class NameMappingBase(BaseModel):
     full_path: str
@@ -9,7 +9,7 @@ class NameMappingCreate(NameMappingBase):
 
 class NameMapping(NameMappingBase):
     id: int
-    chunk_hashes: List[str]
+    chunk_hashes: List[Tuple[str, int]]
 
     class Config:
         orm_mode = True
