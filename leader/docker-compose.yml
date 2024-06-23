@@ -20,17 +20,6 @@ services:
       - db
     environment:
       DATABASE_URL: postgresql://user:password@db:5432/mydatabase
-  chunk_server:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    environment:
-      - SERVER_ID=${SERVER_ID}
-    volumes:
-      - chunk_storage:/app/chunk_storage
-      - ./chunk_metadata.db:/app/chunk_metadata.db
-    ports:
-      - "8001:8000"
 
 volumes:
   postgres_data:
