@@ -1,6 +1,29 @@
 from sqlalchemy.orm import Session
 from . import models, schemas
 
+def get_chunk_servers(db: Session):
+    return db.query(models.ChunkServer).all()
+
+def create_chunk_server(db: Session, chunk_server: models.ChunkServer):
+    db.add(chunk_server)
+    db.commit()
+    db.refresh(chunk_server)
+    return chunk_server
+
+def update_chunk_server_fail_count(db: Session, url: str, fail_count: int):
+    chunk_server = db.query(models.ChunkServer).filter(models.ChunkServer.url == url).first()
+    if chunk_server:
+        chunk_server.fail_count = fail_count
+        db.commit()
+    return chunk_server
+
+def delete_chunk_server(db: Session, url: str):
+    chunk_server = db.query(models.ChunkServer).filter(models.ChunkServer.url == url).first()
+    if chunk_server:
+        db.delete(chunk_server)
+        db.commit()
+    return chunk_server
+
 def get_name_mapping(db: Session, name: str):
     return db.query(models.NameMapping).filter(models.NameMapping.full_path == name).first()
 

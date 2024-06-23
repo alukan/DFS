@@ -14,22 +14,32 @@ app = FastAPI()
 
 # Initialize the list of chunk servers
 chunk_servers = []
+@app.on_event("startup")
+async def startup_event():
+    db = next(get_db())
+    # Fetch chunk servers from the database
+    global chunk_servers
+    chunk_servers = crud.get_chunk_servers(db)
+    asyncio.create_task(health_check())
 
 @app.post("/register_chunk_server/")
 def register_chunk_server(url: str, db: Session = Depends(get_db)):
     # Check for duplicates
     for server in chunk_servers:
-        if server["url"] == url:
+        if server.url == url:
             return {"message": "Chunk server already registered", "url": url, "position": server["position"]}
 
     position = str(int(hashlib.md5(url.encode('utf-8')).hexdigest(), 16))  # Convert to string
-    chunk_servers.append({"url": url, "position": position, "fail_count": 0})
-    chunk_servers.sort(key=lambda x: x['position'])
+    chunk_server = models.ChunkServer(url=url, position=position, fail_count=0)
+    chunk_servers.append(chunk_server)
+    chunk_servers.sort(key=lambda x: x.position)
+    crud.create_chunk_server(db, chunk_server)
+
     return {"message": "Chunk server registered successfully", "url": url, "position": position}
 
 @app.get("/chunk_servers/")
 def get_chunk_servers():
-    return chunk_servers
+    return [{"url": server.url, "position": server.position, "fail_count": server.fail_count} for server in chunk_servers]
 
 @app.post("/namemappings/", response_model=schemas.NameMapping)
 def create_name_mapping(name_mapping: schemas.NameMappingCreate, db: Session = Depends(get_db)):
@@ -89,20 +99,23 @@ async def health_check():
     while True:
         for server in chunk_servers:
             try:
-                response = requests.get(f"{server['url']}/health_check")
+                response = requests.get(f"{server.url}/health_check")
                 if response.status_code == 200:
-                    server['fail_count'] = 0
+                    server.fail_count = 0
                 else:
-                    server['fail_count'] += 1
+                    server.fail_count += 1
             except requests.exceptions.RequestException:
-                server['fail_count'] += 1
+                server.fail_count += 1
 
-            if server['fail_count'] >= 5:
-                chunk_servers.remove(server)
-                print(f"Removed chunk server: {server['url']} due to failed health checks.")
+            
+                db = next(get_db())
+                crud.update_chunk_server_fail_count(db, server.url, server.fail_count)
+
+                if server.fail_count >= 5:
+                    chunk_servers.remove(server)
+                    crud.delete_chunk_server(db, server.url)
+                    print(f"Removed chunk server: {server.url} due to failed health checks.")
         
         await asyncio.sleep(10)
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(health_check())
+
