@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
+from collections import defaultdict
 from typing import List, Dict, Tuple
 import requests
 import os
@@ -13,6 +14,7 @@ app = FastAPI()
 LEADER_URL = os.getenv("LEADER_URL", "http://host.docker.internal:8000")
 CHUNK_SIZE = 1024
 AMOUNT_OF_REPLICAS = 3
+MAX_CHUNKS_PER_REQUEST = 100 
 
 def hash_chunk(chunk):
     return hashlib.md5(chunk).hexdigest()
@@ -56,15 +58,6 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), path:
 
     file_size = os.path.getsize(file_location)
 
-    chunk_hashes = []
-    chunk_positions = []
-    with open(file_location, 'rb') as f:
-        while chunk := f.read(CHUNK_SIZE):
-            chunk_hash = hash_chunk(chunk)
-            position = str(int(hashlib.md5(chunk_hash.encode('utf-8')).hexdigest(), 16))
-            chunk_hashes.append(chunk_hash)
-            chunk_positions.append((chunk_hash, position))
-
     # Get the list of chunk servers from the leader
     response = requests.get(f"{LEADER_URL}/chunk_servers/")
     if response.status_code != 200:
@@ -75,22 +68,35 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), path:
     if not chunk_servers:
         raise HTTPException(status_code=503, detail="No chunk servers are currently connected. Please try again later.")
 
-    # Send chunks to the appropriate servers (pending)
-    async with aiohttp.ClientSession() as session:
-        for chunk_hash, position in chunk_positions:
+    chunk_hashes = []
+    chunk_positions = []
+    server_chunks = defaultdict(list)
+    
+    with open(file_location, 'rb') as f:
+        while chunk := f.read(CHUNK_SIZE):
+            chunk_hash = hash_chunk(chunk)
+            position = str(int(hashlib.md5(chunk_hash.encode('utf-8')).hexdigest(), 16))
+            chunk_hashes.append(chunk_hash)
+            chunk_positions.append((chunk_hash, position))
+
             servers = get_chunk_server_positions(chunk_hash, chunk_servers)
             for server in servers:
-                url = f"{server['url']}/store_chunks_pending/"
-                with open(file_location, 'rb') as f:
-                    while chunk := f.read(CHUNK_SIZE):
-                        current_chunk_hash = hash_chunk(chunk)
-                        if current_chunk_hash == chunk_hash:
-                            data = FormData()
-                            data.add_field('file', chunk, filename=chunk_hash)
-                            data.add_field('chunk_hash', chunk_hash)
-                            async with session.post(url, data=data) as response:
-                                if response.status != 200:
-                                    raise HTTPException(status_code=response.status, detail=f"Failed to store chunk on server {server['url']}")
+                server_chunks[server['url']].append((chunk, chunk_hash))
+
+
+    async with aiohttp.ClientSession() as session:
+        for server_url, chunks in server_chunks.items():
+            for i in range(0, len(chunks), MAX_CHUNKS_PER_REQUEST):
+                batch_chunks = chunks[i:i + MAX_CHUNKS_PER_REQUEST]
+                url = f"{server_url}/store_chunks_pending/"
+                data = FormData()
+                for chunk, chunk_hash in batch_chunks:
+                    data.add_field('file', chunk, filename=chunk_hash)
+                    data.add_field('chunk_hash', chunk_hash)
+                async with session.post(url, data=data) as response:
+                    if response.status != 200:
+                        raise HTTPException(status_code=response.status, detail=f"Failed to store chunks on server {server_url}")
+
 
     # Notify the leader about the new file and its chunks
     name_mapping = {"full_path": os.path.join(path, name), "chunk_hashes": chunk_positions, "size": file_size}
@@ -110,6 +116,7 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), path:
 
     os.remove(file_location)  # Cleanup the temporary file
     return {"message": "File uploaded and processed successfully"}
+
 
 @app.get("/namemappings/{full_path:path}", response_model=Dict)
 async def get_name_mapping(full_path: str):
