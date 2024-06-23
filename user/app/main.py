@@ -12,14 +12,34 @@ app = FastAPI()
 
 LEADER_URL = os.getenv("LEADER_URL", "http://host.docker.internal:8000")
 CHUNK_SIZE = 1024
+AMOUNT_OF_REPLICAS = 3
 
 def hash_chunk(chunk):
     return hashlib.md5(chunk).hexdigest()
 
-def get_chunk_server_position(chunk_hash, chunk_servers):
+def get_chunk_server_positions(chunk_hash, chunk_servers):
     position = int(hashlib.md5(chunk_hash.encode('utf-8')).hexdigest(), 16)
     idx = bisect.bisect([int(server['position']) for server in chunk_servers], int(position))
-    return chunk_servers[idx % len(chunk_servers)]
+    # Return the next AMOUNT_OF_REPLICAS active servers in the ring
+    servers = []
+    for i in range(len(chunk_servers)):
+        server = chunk_servers[(idx + i) % len(chunk_servers)]
+        if server['fail_count'] == 0:
+            servers.append(server)
+        if len(servers) == AMOUNT_OF_REPLICAS:
+            break
+    return servers
+
+async def fetch_chunk_with_retries(session, chunk_servers, chunk_hash):
+    for server in chunk_servers[:AMOUNT_OF_REPLICAS]:
+        try:
+            url = f"{server['url']}/get_chunk"
+            async with session.get(url, params={"chunk_hash": chunk_hash}) as response:
+                if response.status == 200:
+                    return await response.read()
+        except Exception as e:
+            continue
+    raise HTTPException(status_code=404, detail=f"Chunk {chunk_hash} not found on any server")
 
 async def fetch_chunk(session, url, chunk_hash):
     async with session.get(url, params={"chunk_hash": chunk_hash}) as response:
@@ -56,18 +76,19 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), path:
     # Send chunks to the appropriate servers (pending)
     async with aiohttp.ClientSession() as session:
         for chunk_hash, position in chunk_positions:
-            server = get_chunk_server_position(chunk_hash, chunk_servers)
-            url = f"{server['url']}/store_chunks_pending/"
-            with open(file_location, 'rb') as f:
-                while chunk := f.read(CHUNK_SIZE):
-                    current_chunk_hash = hash_chunk(chunk)
-                    if current_chunk_hash == chunk_hash:
-                        data = FormData()
-                        data.add_field('file', chunk, filename=chunk_hash)
-                        data.add_field('chunk_hash', chunk_hash)
-                        async with session.post(url, data=data) as response:
-                            if response.status != 200:
-                                raise HTTPException(status_code=response.status, detail=f"Failed to store chunk on server {server['url']}")
+            servers = get_chunk_server_positions(chunk_hash, chunk_servers)
+            for server in servers:
+                url = f"{server['url']}/store_chunks_pending/"
+                with open(file_location, 'rb') as f:
+                    while chunk := f.read(CHUNK_SIZE):
+                        current_chunk_hash = hash_chunk(chunk)
+                        if current_chunk_hash == chunk_hash:
+                            data = FormData()
+                            data.add_field('file', chunk, filename=chunk_hash)
+                            data.add_field('chunk_hash', chunk_hash)
+                            async with session.post(url, data=data) as response:
+                                if response.status != 200:
+                                    raise HTTPException(status_code=response.status, detail=f"Failed to store chunk on server {server['url']}")
 
     # Notify the leader about the new file and its chunks
     name_mapping = {"full_path": os.path.join(path, name), "chunk_hashes": chunk_positions}
@@ -78,11 +99,12 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), path:
     # Finalize chunks on the servers
     async with aiohttp.ClientSession() as session:
         for chunk_hash, position in chunk_positions:
-            server = get_chunk_server_position(chunk_hash, chunk_servers)
-            url = f"{server['url']}/finalize_chunks/"
-            async with session.post(url, json={"chunks": [chunk_hash]}) as response:
-                if response.status != 200:
-                    raise HTTPException(status_code=response.status, detail=f"Failed to finalize chunk on server {server['url']}")
+            servers = get_chunk_server_positions(chunk_hash, chunk_servers)
+            for server in servers:
+                url = f"{server['url']}/finalize_chunks/"
+                async with session.post(url, json={"chunks": [chunk_hash]}) as response:
+                    if response.status != 200:
+                        raise HTTPException(status_code=response.status, detail=f"Failed to finalize chunk on server {server['url']}")
 
     os.remove(file_location)  # Cleanup the temporary file
     return {"message": "File uploaded and processed successfully"}
@@ -125,7 +147,10 @@ async def list_files_in_folder(folder_path: str = Query(..., description="The pa
         raise HTTPException(status_code=response.status, detail="Error listing files")
 
 @app.get("/readfile/")
-async def read_file_by_name(full_path: str = Query(..., description="The full path of the file to read"), save_as: str = Query(..., description="The name of the file to save the text as")):
+async def read_file_by_name(
+    full_path: str = Query(..., description="The full path of the file to read"),
+    save_as: str = Query(None, description="The name of the file to save the text as")
+):
     # Get chunk information from the leader
     response = requests.get(f"{LEADER_URL}/namemappings/{full_path}")
     if response.status_code != 200:
@@ -142,33 +167,24 @@ async def read_file_by_name(full_path: str = Query(..., description="The full pa
     chunk_servers = response.json()
 
     # Organize chunks by server
-    server_chunks = {}
-    for chunk_hash, position in chunk_hashes:
-        server = get_chunk_server_position(chunk_hash, chunk_servers)
-        if server['url'] not in server_chunks:
-            server_chunks[server['url']] = []
-        server_chunks[server['url']].append(chunk_hash)
-
-    # Fetch chunks from servers
     file_data = bytearray()
     async with aiohttp.ClientSession() as session:
-        tasks = []
-        for server_url, chunks in server_chunks.items():
-            for chunk_hash in chunks:
-                tasks.append(fetch_chunk(session, f"{server_url}/get_chunk", chunk_hash))
-        
-        results = await asyncio.gather(*tasks)
-        for chunk_data in results:
+        for chunk_hash, position in chunk_hashes:
+            servers = get_chunk_server_positions(chunk_hash, chunk_servers)
+            chunk_data = await fetch_chunk_with_retries(session, servers, chunk_hash)
             file_data.extend(chunk_data)
 
-    file_text = file_data.decode('utf-8')
-    
-    # Save to file
-    save_path = f"/tmp/{save_as}"
-    with open(save_path, 'w') as f:
-        f.write(file_text)
 
-    return {"file_data": file_text, "saved_as": save_path}
+    file_text = file_data.decode('utf-8')
+
+    if save_as:
+        # Save to file
+        save_path = f"/tmp/{save_as}"
+        with open(save_path, 'w') as f:
+            f.write(file_text)
+        return {"file_data": file_text, "saved_as": save_path}
+    
+    return {"file_data": file_text}
 
 # Run the user FastAPI app on the specified port
 if __name__ == "__main__":
