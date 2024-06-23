@@ -125,7 +125,7 @@ async def list_files_in_folder(folder_path: str = Query(..., description="The pa
         raise HTTPException(status_code=response.status, detail="Error listing files")
 
 @app.get("/readfile/")
-async def read_file_by_name(full_path: str = Query(..., description="The full path of the file to read")):
+async def read_file_by_name(full_path: str = Query(..., description="The full path of the file to read"), save_as: str = Query(..., description="The name of the file to save the text as")):
     # Get chunk information from the leader
     response = requests.get(f"{LEADER_URL}/namemappings/{full_path}")
     if response.status_code != 200:
@@ -161,7 +161,14 @@ async def read_file_by_name(full_path: str = Query(..., description="The full pa
         for chunk_data in results:
             file_data.extend(chunk_data)
 
-    return {"file_data": file_data.decode('utf-8')}
+    file_text = file_data.decode('utf-8')
+    
+    # Save to file
+    save_path = f"/tmp/{save_as}"
+    with open(save_path, 'w') as f:
+        f.write(file_text)
+
+    return {"file_data": file_text, "saved_as": save_path}
 
 # Run the user FastAPI app on the specified port
 if __name__ == "__main__":
