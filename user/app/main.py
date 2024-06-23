@@ -54,6 +54,8 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), path:
     with open(file_location, "wb") as f:
         f.write(file.file.read())
 
+    file_size = os.path.getsize(file_location)
+
     chunk_hashes = []
     chunk_positions = []
     with open(file_location, 'rb') as f:
@@ -91,7 +93,7 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), path:
                                     raise HTTPException(status_code=response.status, detail=f"Failed to store chunk on server {server['url']}")
 
     # Notify the leader about the new file and its chunks
-    name_mapping = {"full_path": os.path.join(path, name), "chunk_hashes": chunk_positions}
+    name_mapping = {"full_path": os.path.join(path, name), "chunk_hashes": chunk_positions, "size": file_size}
     response = requests.post(f"{LEADER_URL}/namemappings/", json=name_mapping)
     if response.status_code != 200:
         raise HTTPException(status_code=response.status_code, detail="Error creating name mapping")
@@ -129,7 +131,7 @@ async def delete_chunks_from_servers(session, chunk_servers, chunk_hashes):
 
 
 @app.delete("/namemappings/{full_path:path}")
-async def delete_name_mapping(full_path: str, db: Session = Depends(get_db)):
+async def delete_name_mapping(full_path: str):
     # Get chunk information from the leader
     response = requests.get(f"{LEADER_URL}/namemappings/{full_path}")
     if response.status_code != 200:
@@ -216,6 +218,15 @@ async def read_file_by_name(
         return {"file_data": file_text, "saved_as": save_path}
     
     return {"file_data": file_text}
+
+@app.get("/filesize/")
+async def get_file_size(full_path: str = Query(..., description="The full path of the file to get the size of")):
+    # Get the file size from the leader
+    response = requests.get(f"{LEADER_URL}/file/{full_path}/size")
+    if response.status_code == 200:
+        return {"file_size": str(response.json()) + " bytes"}
+    else:
+        raise HTTPException(status_code=response.status_code, detail="Error fetching file size")
 
 # Run the user FastAPI app on the specified port
 if __name__ == "__main__":

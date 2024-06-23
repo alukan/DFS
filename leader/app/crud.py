@@ -29,8 +29,9 @@ def get_name_mapping(db: Session, name: str):
 
 def create_name_mapping(db: Session, name_mapping: schemas.NameMappingCreate):
     db_name_mapping = models.NameMapping(
-        full_path=name_mapping.full_path, 
-        chunk_hashes=name_mapping.chunk_hashes
+        full_path=name_mapping.full_path,
+        chunk_hashes=name_mapping.chunk_hashes,
+        size=name_mapping.size
     )
     db.add(db_name_mapping)
     db.commit()

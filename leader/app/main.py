@@ -12,6 +12,29 @@ from .db import get_db
 
 app = FastAPI()
 
+async def health_check():
+    while True:
+        for server in chunk_servers:
+            try:
+                response = requests.get(f"{server.url}/health_check")
+                if response.status_code == 200:
+                    server.fail_count = 0
+                else:
+                    server.fail_count += 1
+            except requests.exceptions.RequestException:
+                server.fail_count += 1
+
+            
+                db = next(get_db())
+                crud.update_chunk_server_fail_count(db, server.url, server.fail_count)
+
+                if server.fail_count >= 5:
+                    chunk_servers.remove(server)
+                    crud.delete_chunk_server(db, server.url)
+                    print(f"Removed chunk server: {server.url} due to failed health checks.")
+        
+        await asyncio.sleep(10)
+
 # Initialize the list of chunk servers
 chunk_servers = []
 @app.on_event("startup")
@@ -95,27 +118,15 @@ def list_files_in_folder(
         raise HTTPException(status_code=404, detail="No files found in the specified folder")
     return files
 
-async def health_check():
-    while True:
-        for server in chunk_servers:
-            try:
-                response = requests.get(f"{server.url}/health_check")
-                if response.status_code == 200:
-                    server.fail_count = 0
-                else:
-                    server.fail_count += 1
-            except requests.exceptions.RequestException:
-                server.fail_count += 1
 
-            
-                db = next(get_db())
-                crud.update_chunk_server_fail_count(db, server.url, server.fail_count)
-
-                if server.fail_count >= 5:
-                    chunk_servers.remove(server)
-                    crud.delete_chunk_server(db, server.url)
-                    print(f"Removed chunk server: {server.url} due to failed health checks.")
-        
-        await asyncio.sleep(10)
-
+@app.get("/file/{full_path:path}/size", response_model=int)
+def get_file_size(
+    full_path: str = Path(..., description="The full path of the name mapping"),
+    db: Session = Depends(get_db)
+):
+    print(full_path)
+    db_name_mapping = crud.get_name_mapping(db=db, name=full_path)
+    if db_name_mapping is None:
+        raise HTTPException(status_code=404, detail="Name not found")
+    return db_name_mapping.size
 

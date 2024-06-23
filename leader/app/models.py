@@ -8,7 +8,8 @@ class NameMapping(Base):
     __tablename__ = 'name_mappings'
     id = Column(Integer, primary_key=True, index=True)
     full_path = Column(String, unique=True, index=True)
-    chunk_hashes = Column(JSONB)
+    chunk_hashes = Column(JSONB, nullable=False)
+    size = Column(Integer, nullable=False)
 
 class ChunkServer(Base):
     __tablename__ = "chunk_servers"
