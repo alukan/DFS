@@ -1,8 +1,12 @@
 from fastapi import FastAPI, Depends, HTTPException, Path, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from typing import List, Dict
+from typing import List, Dict, Tuple
 import hashlib
+import requests
+import asyncio
+import os
+
 from . import crud, models, schemas
 from .db import get_db
 
@@ -13,8 +17,13 @@ chunk_servers = []
 
 @app.post("/register_chunk_server/")
 def register_chunk_server(url: str, db: Session = Depends(get_db)):
-    position = int(hashlib.md5(url.encode('utf-8')).hexdigest(), 16)
-    chunk_servers.append({"url": url, "position": position})
+    # Check for duplicates
+    for server in chunk_servers:
+        if server["url"] == url:
+            return {"message": "Chunk server already registered", "url": url, "position": server["position"]}
+
+    position = str(int(hashlib.md5(url.encode('utf-8')).hexdigest(), 16))  # Convert to string
+    chunk_servers.append({"url": url, "position": position, "fail_count": 0})
     chunk_servers.sort(key=lambda x: x['position'])
     return {"message": "Chunk server registered successfully", "url": url, "position": position}
 
@@ -75,3 +84,25 @@ def list_files_in_folder(
     if not files:
         raise HTTPException(status_code=404, detail="No files found in the specified folder")
     return files
+
+async def health_check():
+    while True:
+        for server in chunk_servers:
+            try:
+                response = requests.get(f"{server['url']}/health_check")
+                if response.status_code == 200:
+                    server['fail_count'] = 0
+                else:
+                    server['fail_count'] += 1
+            except requests.exceptions.RequestException:
+                server['fail_count'] += 1
+
+            if server['fail_count'] >= 5:
+                chunk_servers.remove(server)
+                print(f"Removed chunk server: {server['url']} due to failed health checks.")
+        
+        await asyncio.sleep(10)
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(health_check())

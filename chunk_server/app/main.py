@@ -1,14 +1,9 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 import os
 import requests
-import logging
 
 app = FastAPI()
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 # Directory to store chunks
 CHUNK_DIR = "/tmp/chunks"
@@ -17,7 +12,7 @@ CHUNK_DIR = "/tmp/chunks"
 os.makedirs(CHUNK_DIR, exist_ok=True)
 
 # Leader URL and Port
-LEADER_URL = os.getenv("LEADER_URL", "http://localhost:8000")
+LEADER_URL = os.getenv("LEADER_URL", "http://host.docker.internal:8000")
 PORT = int(os.getenv("PORT", 8100))
 
 class Chunk(BaseModel):
@@ -29,12 +24,11 @@ class Chunks(BaseModel):
     file: bytes
 
 @app.post("/store_chunks_pending/")
-def store_chunks_pending(chunks: Chunks):
-    for chunk_hash in chunks.chunks:
-        chunk_path = os.path.join(CHUNK_DIR, f"pending_{chunk_hash}")
-        with open(chunk_path, "wb") as f:
-            f.write(chunks.file)
-    return {"message": "Chunks stored in pending mode"}
+def store_chunks_pending(file: UploadFile = File(...), chunk_hash: str = Form(...)):
+    chunk_path = os.path.join(CHUNK_DIR, f"pending_{chunk_hash}")
+    with open(chunk_path, "wb") as f:
+        f.write(file.file.read())
+    return {"message": "Chunk stored in pending mode"}
 
 @app.post("/finalize_chunks/")
 def finalize_chunks(chunks: Chunks):
@@ -53,18 +47,22 @@ def delete_chunks(chunks: Chunks):
             os.remove(chunk_path)
     return {"message": "Chunks deleted"}
 
+@app.get("/health_check")
+def health_check():
+    return {"status": "ok"}
+
 @app.on_event("startup")
 def register_with_leader():
     try:
-        response = requests.post(f"{LEADER_URL}/register_chunk_server/", params={"url": f"http://localhost:{PORT}"})
+        response = requests.post(f"{LEADER_URL}/register_chunk_server/", params={"url": f"http://host.docker.internal:{PORT}"})
         if response.status_code == 200:
-            logger.info("Successfully registered with the leader.")
+            print("Successfully registered with the leader.")
         else:
-            logger.error("Failed to register with the leader.")
+            print("Failed to register with the leader.")
     except Exception as e:
-        logger.error(f"Error registering with the leader: {e}")
+        print(f"Error registering with the leader: {e}")
 
+# Run the chunk server FastAPI app on the specified port
 if __name__ == "__main__":
     import uvicorn
-    logger.info("Starting chunk server...")
     uvicorn.run(app, host="0.0.0.0", port=PORT)
