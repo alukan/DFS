@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel
 import os
 import requests
@@ -20,8 +20,7 @@ class Chunk(BaseModel):
     data: str
 
 class Chunks(BaseModel):
-    chunks: list
-    file: bytes
+    chunks: list[str]
 
 @app.post("/store_chunks_pending/")
 def store_chunks_pending(file: UploadFile = File(...), chunk_hash: str = Form(...)):
@@ -51,6 +50,15 @@ def delete_chunks(chunks: Chunks):
 def health_check():
     return {"status": "ok"}
 
+@app.get("/get_chunk")
+def get_chunk(chunk_hash: str = Query(..., description="The hash of the chunk to fetch")):
+    chunk_path = os.path.join(CHUNK_DIR, chunk_hash)
+    if not os.path.exists(chunk_path):
+        raise HTTPException(status_code=404, detail="Chunk not found")
+    with open(chunk_path, "rb") as f:
+        chunk_data = f.read()
+    return chunk_data
+
 @app.on_event("startup")
 def register_with_leader():
     try:
@@ -62,7 +70,7 @@ def register_with_leader():
     except Exception as e:
         print(f"Error registering with the leader: {e}")
 
-# Run the chunk server FastAPI app on the specified port
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=PORT)
