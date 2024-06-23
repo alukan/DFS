@@ -1,14 +1,15 @@
 from pydantic import BaseModel
-from typing import Dict
+from typing import List
 
 class NameMappingBase(BaseModel):
-    name: str
+    full_path: str
 
 class NameMappingCreate(NameMappingBase):
-    chunks: Dict[str, str]
+    chunk_hashes: List[str]
 
 class NameMapping(NameMappingBase):
-    chunks: Dict[str, str]
+    id: int
+    chunk_hashes: List[str]
 
     class Config:
         orm_mode = True
