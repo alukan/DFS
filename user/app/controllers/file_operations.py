@@ -57,11 +57,11 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), path:
                 #         raise Exception(f"Failed to store chunks on server {server_url}, status code: {response.status}")
 
 
-    # Notify the leader about the new file and its chunks
+    # Notify the leader about the new file and its chunks as temporary
     name_mapping = {"full_path": os.path.join(path, name), "chunk_hashes": chunk_positions, "size": file_size}
-    response = requests.post(f"{os.getenv('LEADER_URL')}/namemappings/", json=name_mapping)
+    response = requests.post(f"{os.getenv('LEADER_URL')}/temp_namemappings/", json=name_mapping)
     if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Error creating name mapping")
+        raise HTTPException(status_code=response.status_code, detail="Error creating temporary name mapping")
 
     # Finalize chunks on the servers
     async with aiohttp.ClientSession() as session:
@@ -72,6 +72,11 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), path:
                 async with session.post(url, json={"chunks": [chunk_hash]}) as response:
                     if response.status != 200:
                         raise HTTPException(status_code=response.status, detail=f"Failed to finalize chunk on server {server['url']}")
+
+    # Finalize name mapping on the leader
+    response = requests.post(f"{os.getenv('LEADER_URL')}/finalize_namemappings/", params={"full_path": os.path.join(path, name)})
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail="Error finalizing name mapping")
 
     os.remove(file_location)  # Cleanup the temporary file
     return {"message": "File uploaded and processed successfully"}

@@ -12,7 +12,7 @@ router = APIRouter()
 def register_chunk_server(url: str, db: Session = Depends(get_db)):
     for server in chunk_servers:
         if server.url == url:
-            return {"message": "Chunk server already registered", "url": url, "position": server["position"]}
+            return {"message": "Chunk server already registered", "url": url, "position": server.position}
 
     position = str(int(hashlib.md5(url.encode('utf-8')).hexdigest(), 16))
     chunk_server = models.ChunkServer(url=url, position=position, fail_count=0)
