@@ -1,8 +1,7 @@
-from fastapi import BackgroundTasks
+import requests
 from sqlalchemy.orm import Session
-from db import get_db, engine
-from models import ChunkServer
-from sqlalchemy.orm import Session
+from .db import engine
+from .models import ChunkServer
 
 
 def check_health():
@@ -31,24 +30,23 @@ def handle_new_server(new_server: ChunkServer, db: Session):
     chunk_servers = get_chunk_server_list(db)
     new_index = find_server_index(chunk_servers, new_server.id)
 
-    if new_index == -1:
-        chunk_servers.append(new_server)
-        chunk_servers.sort(key=lambda server: server.id)
-        new_index = find_server_index(chunk_servers, new_server.id)
+    # if new_index == -1: # Server already exists
+    #     chunk_servers.append(new_server)
+    #     chunk_servers.sort(key=lambda server: server.id)
+    #     new_index = find_server_index(chunk_servers, new_server.id)
 
-    # Replicate data from two preceding chunk servers
-    preceding_1 = chunk_servers[new_index - 1]
-    preceding_2 = chunk_servers[new_index - 2]
-    replicate_data(preceding_1, new_server)
-    replicate_data(preceding_2, new_server)
+    # Replicate data all data from i+1 less the half of the data that he owns
+    preceding_1 = chunk_servers[new_index + 1]
+    order_send_interval(
+        preceding_1,
+        new_server,
+        chunk_servers[new_index - 3].id,
+        chunk_servers[new_index].id,
+    )
 
-    # Provide half of the data from the succeeding chunk server
-    succeeding = chunk_servers[(new_index + 1) % len(chunk_servers)]
-    provide_half_data(succeeding, new_server)
-
-    # Increase cleanense_need for chunk servers at positions [i+2] and [i+3]
-    chunk_servers[(new_index + 2) % len(chunk_servers)].cleanense_need += 1
-    chunk_servers[(new_index + 3) % len(chunk_servers)].cleanense_need += 1
+    # Increase cleanness_need for chunk servers at positions [i+2] and [i+3]
+    chunk_servers[(new_index + 2) % len(chunk_servers)].cleanness_need += 1
+    chunk_servers[(new_index + 3) % len(chunk_servers)].cleanness_need += 1
 
     db.commit()
 
@@ -60,37 +58,61 @@ def handle_removed_server(removed_server: ChunkServer, db: Session):
     if removed_index == -1:
         return  # Server not found in the list
 
-    # Remove the server from the list
-    chunk_servers.pop(removed_index)
-
     # Order chunk-server[i-2] to provide its interval to the new position
-    preceding_2 = chunk_servers[(removed_index - 2) % len(chunk_servers)]
-    new_position = chunk_servers[removed_index % len(chunk_servers)]
-    provide_interval(preceding_2, new_position)
+    successor_1 = chunk_servers[(removed_index + 1) % len(chunk_servers)]
+    successor_3 = chunk_servers[(removed_index + 3) % len(chunk_servers)]
+    predecessor_1 = chunk_servers[(removed_index - 1) % len(chunk_servers)]
+    predecessor_2 = chunk_servers[(removed_index - 2) % len(chunk_servers)]
+    predecessor_3 = chunk_servers[(removed_index - 3) % len(chunk_servers)]
 
-    # Order chunk-server[i+1] to send the interval of the removed server to chunk-server[i+3]
-    succeeding_1 = chunk_servers[removed_index % len(chunk_servers)]
-    succeeding_3 = chunk_servers[(removed_index + 2) % len(chunk_servers)]
-    send_interval(succeeding_1, succeeding_3)
+    order_send_interval(
+        successor_1,
+        successor_3,
+        predecessor_1.id,
+        removed_server.id,
+    )
+    order_send_interval(
+        predecessor_2,
+        successor_1,
+        predecessor_3.id,
+        predecessor_2.id,
+    )
+
+    # Remove the server from the list
+    db.delete(removed_server)
 
     db.commit()
 
 
-def replicate_data(source_server: ChunkServer, target_server: ChunkServer):
-    # Logic to replicate data from source_server to target_server
-    pass
+def order_send_interval(
+    source_server: ChunkServer,
+    target_server: ChunkServer,
+    ini_chunk: int,
+    end_chunk: int,
+):
+    two_intervals = False
+    if end_chunk < ini_chunk:
+        two_intervals = True
+        second_interval_ini = 0
+        second_interval_end = ini_chunk
+        ini_chunk = end_chunk
+        end_chunk = 2**30 - 1
 
-
-def provide_half_data(source_server: ChunkServer, target_server: ChunkServer):
-    # Logic to provide half of the data from source_server to target_server
-    pass
-
-
-def provide_interval(source_server: ChunkServer, target_server: ChunkServer):
-    # Logic to provide the interval data from source_server to target_server
-    pass
-
-
-def send_interval(source_server: ChunkServer, target_server: ChunkServer):
-    # Logic to send the interval data from source_server to target_server
-    pass
+    # Send the interval [ini_chunk, end_chunk] from source_server to target_server
+    requests.post(
+        f"http://{source_server.host}/send_interval",
+        json={
+            "target": target_server.host,
+            "ini_chunk": ini_chunk,
+            "end_chunk": end_chunk,
+        },
+    )
+    if two_intervals:
+        requests.post(
+            f"http://{source_server.host}/send_interval",
+            json={
+                "target": target_server.host,
+                "ini_chunk": second_interval_ini,
+                "end_chunk": second_interval_end,
+            },
+        )

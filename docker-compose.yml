@@ -5,24 +5,26 @@ services:
     image: postgres:13
     environment:
       POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: mydatabase
+      POSTGRES_PASSWORD: leader
+      POSTGRES_DB: leader
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
 
-  web:
-    build: .
+  leader:
+    build: 
+      context: leader
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     depends_on:
       - db
     environment:
-      DATABASE_URL: postgresql://user:password@db:5432/mydatabase
+      DATABASE_URL: postgresql://user:leader@leader:5432
   chunk_server:
     build:
-      context: .
+      context: chunk-server
       dockerfile: Dockerfile
     environment:
       - SERVER_ID=${SERVER_ID}

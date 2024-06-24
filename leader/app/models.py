@@ -13,6 +13,7 @@ class FileMetadata(Base):
 class ChunkServer(Base):
     __tablename__ = "chunk_servers"
     id = Column(String, primary_key=True, index=True)
-    cleanense_need = Column(Integer, default=0)
+    cleanness_need = Column(Integer, default=0)
     alive_missed = Column(Integer, default=0)
+    host = Column(String, nullable=False)
     alive = Column(Boolean, default=True)

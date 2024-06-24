@@ -15,5 +15,6 @@ class UploadRequest(BaseModel):
 
 class ChunkServerRegistration(BaseModel):
     id: str
-    cleanense_need: int = 0
+    host: str
+    cleanness_need: int = 0
     alive_missed: int = 0

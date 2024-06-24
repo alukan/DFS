@@ -11,6 +11,8 @@ from .schemas import (
     SaveFileRequest,
     FileId,
     RemoveFilesRequest,
+    SaveFilesRequest,
+    SendIntervalRequest,
 )
 from .database import SessionLocal, init_db
 import requests
@@ -27,13 +29,14 @@ def bytes_to_base64(data: bytes) -> str:
 
 SERVER_ID = os.getenv("SERVER_ID", "1")
 LEADER_URL = os.getenv("LEADER_URL", "http://localhost:8000")
+HOST = os.getenv("HOST", "http://localhost:8000")
 logger = logging.getLogger(__name__)
 
 
 def register_to_leader():
     response = requests.post(
         f"{LEADER_URL}/register_chunk_server",
-        json={"server_id": SERVER_ID},
+        json={"id": SERVER_ID, "host": HOST},
         timeout=2,
     )
     logger.info(response.json())
@@ -61,6 +64,19 @@ async def save_chunk_endpoint(request: SaveFileRequest, db: Session = Depends(ge
         return {"message": "Chunk saved successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/save_chunks")
+async def save_chunks_endpoint(
+    request: SaveFilesRequest, db: Session = Depends(get_db)
+):
+    for file in request.files_data:
+        file_id = (file.file_id.search_hash, file.file_id.hash_id)
+        try:
+            save_chunk(file_id, file.file_data, db)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+    return {"message": "Chunks saved successfully"}
 
 
 @app.post("/get_chunk", response_model=GetChunkResponse)
@@ -112,5 +128,17 @@ async def remove_chunks_endpoint(
             db,
         )
         return {"message": "Chunk removal task started"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/send_interval")
+async def send_interval(send_interval_request: SendIntervalRequest):
+    try:
+        send_interval(
+            send_interval_request.start_search_hash,
+            send_interval_request.end_search_hash,
+        )
+        return {"message": "Interval sent successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

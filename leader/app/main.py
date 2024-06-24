@@ -2,14 +2,12 @@ from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List
 
-from db import get_db, Base, engine
-from models import FileMetadata, ChunkServer
-from schema import UploadRequest, ChunkServerRegistration
-from background import check_health, handle_new_server, handle_removed_server
+from .db import get_db, Base, engine, init_db
+from .models import FileMetadata, ChunkServer
+from .schemas import UploadRequest, ChunkServerRegistration
+from .background import check_health, handle_new_server
 
 app = FastAPI()
-
-Base.metadata.create_all(bind=engine)
 
 
 @app.post("/upload")
@@ -33,8 +31,9 @@ async def register_chunk_server(
 ):
     chunk_server = ChunkServer(
         id=server.id,
-        cleanense_need=server.cleanense_need,
+        cleanness_need=server.cleanness_need,
         alive_missed=server.alive_missed,
+        host=server.host,
     )
     db.add(chunk_server)
     db.commit()
@@ -45,4 +44,4 @@ async def register_chunk_server(
 
 @app.on_event("startup")
 async def startup_event():
-    check_health()
+    init_db()

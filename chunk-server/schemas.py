@@ -3,13 +3,17 @@ from pydantic import BaseModel
 
 
 class FileId(BaseModel):
-    search_hash: str
+    search_hash: int
     hash_id: str
 
 
 class SaveFileRequest(BaseModel):
     file_id: FileId
     file_data: bytes
+
+
+class SaveFilesRequest(BaseModel):
+    files_data: List[SaveFileRequest]
 
 
 class GetChunksRequest(BaseModel):
@@ -26,5 +30,11 @@ class GetChunksResponse(BaseModel):
 
 
 class RemoveFilesRequest(BaseModel):
-    start_search_hash: str
-    end_search_hash: str
+    start_search_hash: int
+    end_search_hash: int
+
+
+class SendIntervalRequest(BaseModel):
+    target: str
+    ini_chunk: int
+    end_chunk: int
