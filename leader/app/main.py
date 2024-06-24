@@ -1,40 +1,47 @@
-from fastapi import FastAPI, Depends, HTTPException, Path
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
-from . import crud, models, schemas
-from .db import get_db
+from typing import List
+
+from .db import get_db, Base, engine, init_db
+from .models import FileMetadata, ChunkServer
+from .schemas import UploadRequest, ChunkServerRegistration
+from .background import check_health, handle_new_server
 
 app = FastAPI()
 
-@app.post("/namemappings/", response_model=schemas.NameMapping)
-def create_name_mapping(name_mapping: schemas.NameMappingCreate, db: Session = Depends(get_db)):
-    try:
-        db_name_mapping = crud.create_name_mapping(db=db, name_mapping=name_mapping)
-        return db_name_mapping
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Name already taken")
-    
-    name_mapping.name = name_mapping
-    db_name_mapping = crud.create_name_mapping(db=db, name_mapping=name_mapping)
-    return db_name_mapping
 
-@app.delete("/namemappings/{full_path:path}")
-def delete_name_mapping(
-    full_path: str = Path(..., description="The full path of the name mapping"),
-    db: Session = Depends(get_db)
-):
-    success = crud.delete_name_mapping(db=db, name=full_path)
-    if not success:
-        raise HTTPException(status_code=404, detail="Name not found")
-    return {"message": "Name deleted successfully"}
+@app.post("/upload")
+async def upload_chunks(request: UploadRequest, db: Session = Depends(get_db)):
+    metadata = FileMetadata(
+        file_id=request.file_id,
+        data=[
+            {"hash_id": chunk.hash_id, "search_hash": chunk.search_hash}
+            for chunk in request.data
+        ],
+    )
+    db.add(metadata)
+    db.commit()
+    # Distribute chunks to chunk servers (implement the distribution logic here)
+    return {"message": "Chunks uploaded successfully"}
 
-@app.get("/namemappings/{full_path:path}", response_model=schemas.NameMapping)
-def get_name_mapping(
-    full_path: str = Path(..., description="The full path of the name mapping"),
-    db: Session = Depends(get_db)
+
+@app.post("/register-chunk-server")
+async def register_chunk_server(
+    server: ChunkServerRegistration, db: Session = Depends(get_db)
 ):
-    db_name_mapping = crud.get_name_mapping(db=db, name=full_path)
-    if db_name_mapping is None:
-        raise HTTPException(status_code=404, detail="Name not found")
-    return db_name_mapping
+    chunk_server = ChunkServer(
+        id=server.id,
+        cleanness_need=server.cleanness_need,
+        alive_missed=server.alive_missed,
+        host=server.host,
+    )
+    db.add(chunk_server)
+    db.commit()
+    # Handle the addition of a new server
+    handle_new_server(chunk_server, db)
+    return {"message": "Chunk server registered successfully"}
+
+
+@app.on_event("startup")
+async def startup_event():
+    init_db()
