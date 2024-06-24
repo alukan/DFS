@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel
 import os
 import requests
+import aiofiles
 
 app = FastAPI()
 
@@ -19,18 +20,21 @@ class Chunk(BaseModel):
     chunk_hash: str
     data: str
 
-class Chunks(BaseModel):
+class ChunkHashes(BaseModel):
     chunks: list[str]
 
 @app.post("/store_chunks_pending/")
-def store_chunks_pending(file: UploadFile = File(...), chunk_hash: str = Form(...)):
-    chunk_path = os.path.join(CHUNK_DIR, f"pending_{chunk_hash}")
-    with open(chunk_path, "wb") as f:
-        f.write(file.file.read())
-    return {"message": "Chunk stored in pending mode"}
+async def store_chunks_pending(chunks: list[Chunk]):
+    for chunk in chunks:
+        chunk_path = os.path.join(CHUNK_DIR, f"pending_{chunk.chunk_hash}")
+        os.makedirs(os.path.dirname(chunk_path), exist_ok=True)
+        async with aiofiles.open(chunk_path, "w", encoding='utf-8') as f:
+            await f.write(chunk.data)
+    return {"message": f"Stored {len(chunks)} chunks in pending mode"}
+
 
 @app.post("/finalize_chunks/")
-def finalize_chunks(chunks: Chunks):
+def finalize_chunks(chunks: ChunkHashes):
     for chunk_hash in chunks.chunks:
         pending_chunk_path = os.path.join(CHUNK_DIR, f"pending_{chunk_hash}")
         final_chunk_path = os.path.join(CHUNK_DIR, chunk_hash)
@@ -39,7 +43,7 @@ def finalize_chunks(chunks: Chunks):
     return {"message": "Chunks finalized"}
 
 @app.post("/delete_chunks/")
-def delete_chunks(chunks: Chunks):
+def delete_chunks(chunks: ChunkHashes):
     for chunk_hash in chunks.chunks:
         chunk_path = os.path.join(CHUNK_DIR, chunk_hash)
         if os.path.exists(chunk_path):

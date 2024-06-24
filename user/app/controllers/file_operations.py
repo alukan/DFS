@@ -12,7 +12,7 @@ import hashlib
 router = APIRouter()
 
 CHUNK_SIZE = 1024
-MAX_CHUNKS_PER_REQUEST = 100
+MAX_CHUNKS_PER_REQUEST = 2000
 
 @router.post("/uploadfile/")
 async def upload_file(file: UploadFile = File(...), name: str = Form(...), path: str = Form(...)):
@@ -40,18 +40,22 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), path:
             for server in servers:
                 server_chunks[server['url']].append((chunk, chunk_hash))
 
-    async with aiohttp.ClientSession() as session:
-        for server_url, chunks in server_chunks.items():
-            for i in range(0, len(chunks), MAX_CHUNKS_PER_REQUEST):
-                batch_chunks = chunks[i:i + MAX_CHUNKS_PER_REQUEST]
-                url = f"{server_url}/store_chunks_pending/"
-                data = FormData()
-                for chunk, chunk_hash in batch_chunks:
-                    data.add_field('file', chunk, filename=chunk_hash)
-                    data.add_field('chunk_hash', chunk_hash)
-                async with session.post(url, data=data) as response:
-                    if response.status != 200:
-                        raise HTTPException(status_code=response.status, detail=f"Failed to store chunks on server {server_url}")
+    # async with aiohttp.ClientSession() as session:
+    for server_url, chunks in server_chunks.items():
+        for i in range(0, len(chunks), MAX_CHUNKS_PER_REQUEST):
+            batch_chunks = chunks[i:i + MAX_CHUNKS_PER_REQUEST]
+            url = f"{server_url}/store_chunks_pending/"
+            files = []
+            chunks = [
+            {"data": chunk.decode('utf-8'), "chunk_hash": chunk_hash} for chunk, chunk_hash in batch_chunks
+            ]
+        response = requests.post(url, json=chunks)
+        if response.status_code != 200:
+            raise Exception(f"Failed to store chunks on server {server_url}, status code: {response.status_code}")
+                # async with session.post(url, data=data) as response:
+                #     if response.status != 200:
+                #         raise Exception(f"Failed to store chunks on server {server_url}, status code: {response.status}")
+
 
     # Notify the leader about the new file and its chunks
     name_mapping = {"full_path": os.path.join(path, name), "chunk_hashes": chunk_positions, "size": file_size}
