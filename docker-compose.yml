@@ -1,0 +1,128 @@
+version: '3.9'
+
+services:
+  db:
+    image: postgres:13
+    container_name: db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: mydatabase
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - filesystem
+
+  leader:
+    container_name: leader
+    build: 
+      context: leader
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/mydatabase
+    networks:
+      - filesystem
+  user_1:
+    container_name: user_1
+    build: 
+      context: user
+    environment:
+      LEADER_URL: http://leader:8000
+      PORT: 8010
+    ports:
+      - "8010:8010"
+    depends_on:
+      - leader
+    networks:
+      - filesystem
+  # user_2:
+  #   container_name: user_2
+  #   build: 
+  #     context: user
+  #   environment:
+  #     LEADER_URL: http://leader:8000
+  #     PORT: 8011
+  #   ports:
+  #     - "8011:8011"
+  #   depends_on:
+  #     - leader
+  #   networks:
+  #     - filesystem
+  chunk_server_1:
+    container_name: chunk_server_1
+    build: 
+      context: chunk_server
+    environment:
+      LEADER_URL: http://leader:8000
+      PORT: 8001
+    ports:
+      - "8001:8001"
+    depends_on:
+      - leader
+    networks:
+      - filesystem
+  chunk_server_2:
+    container_name: chunk_server_2
+    build: 
+      context: chunk_server
+    environment:
+      LEADER_URL: http://leader:8000
+      PORT: 8002
+    ports:
+      - "8002:8002"
+    depends_on:
+      - leader
+    networks:
+      - filesystem
+  chunk_server_3:
+    container_name: chunk_server_3
+    build: 
+      context: chunk_server
+    environment:
+      LEADER_URL: http://leader:8000
+      PORT: 8003
+    ports:
+      - "8003:8003"
+    depends_on:
+      - leader
+    networks:
+      - filesystem
+  chunk_server_4:
+    container_name: chunk_server_4
+    build: 
+      context: chunk_server
+    environment:
+      LEADER_URL: http://leader:8000
+      PORT: 8004
+    ports:
+      - "8004:8004"
+    depends_on:
+      - leader
+    networks:
+      - filesystem
+  chunk_server_5:
+    container_name: chunk_server_5
+    build: 
+      context: chunk_server
+    environment:
+      LEADER_URL: http://leader:8000
+      PORT: 8005
+    ports:
+      - "8005:8005"
+    depends_on:
+      - leader
+    networks:
+      - filesystem
+
+volumes:
+  postgres_data:
+
+networks:
+  filesystem:
+    
+  
