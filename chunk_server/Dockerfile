@@ -4,8 +4,7 @@ FROM python:3.9-slim
 # Set the working directory in the container
 WORKDIR /app
 
-# Copy the current directory contents into the container
-COPY . .
+COPY requirements.txt .
 
 # Copy the cleanup script into the container
 COPY cleanup.sh /usr/local/bin/cleanup.sh
@@ -13,6 +12,7 @@ COPY cleanup.sh /usr/local/bin/cleanup.sh
 # Install any needed packages specified in requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy the current directory contents into the container
 # Install cron
 RUN apt-get update && apt-get install -y cron
 
@@ -24,6 +24,8 @@ RUN echo "*/10 * * * * /usr/local/bin/cleanup.sh" > /etc/cron.d/cleanup-cron
 
 # Give execution rights on the cron job file
 RUN chmod 0644 /etc/cron.d/cleanup-cron
+
+COPY . .
 
 # Apply the cron job
 RUN crontab /etc/cron.d/cleanup-cron

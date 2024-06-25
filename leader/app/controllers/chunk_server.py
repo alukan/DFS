@@ -30,7 +30,7 @@ async def health_check():
     while True:
         for server in chunk_servers:
             try:
-                response = requests.get(f"{server.url}/health_check")
+                response = requests.get(f"{server.url}/health_check", timeout=1)
                 if response.status_code == 200:
                     server.fail_count = 0
                 else:

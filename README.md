@@ -1,3 +1,9 @@
+# Start Everything
+```
+docker-compose up --build
+```
+User is running on 8010 port
+
 # Start of leader
 ```
 cd leader
