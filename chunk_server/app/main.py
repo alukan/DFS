@@ -3,6 +3,8 @@ from pydantic import BaseModel
 import os
 import requests
 import aiofiles
+from datetime import datetime, timedelta
+import asyncio
 
 app = FastAPI()
 
@@ -15,6 +17,8 @@ os.makedirs(CHUNK_DIR, exist_ok=True)
 # Leader URL and Port
 LEADER_URL = os.getenv("LEADER_URL", "http://host.docker.internal:8000")
 PORT = int(os.getenv("PORT", 8100))
+HEALTH_CHECK_INTERVAL = 60  # Seconds
+RECONNECT_INTERVAL = 10  # Seconds
 
 class Chunk(BaseModel):
     chunk_hash: str
@@ -22,6 +26,43 @@ class Chunk(BaseModel):
 
 class ChunkHashes(BaseModel):
     chunks: list[str]
+
+
+@app.on_event("startup")
+async def startup_event():
+    await register_with_leader()
+    asyncio.create_task(check_health())
+
+async def check_health():
+    global last_health_check
+    while True:
+        await asyncio.sleep(HEALTH_CHECK_INTERVAL)
+        if datetime.now() - last_health_check > timedelta(seconds=HEALTH_CHECK_INTERVAL):
+            print("Health check missed, attempting to reconnect to the leader.")
+            await register_with_leader()
+
+async def register_with_leader():
+     while True:
+        try:
+            response = requests.post(f"{LEADER_URL}/register_chunk_server/", params={"url": f"http://host.docker.internal:{PORT}"})
+            if response.status_code == 200:
+                print("Successfully registered with the leader.")
+                global last_health_check
+                last_health_check = datetime.now()
+                return
+            else:
+                print("Failed to register with the leader.")
+        except Exception as e:
+            print(f"Error registering with the leader: {e}")
+        await asyncio.sleep(RECONNECT_INTERVAL)
+
+
+@app.get("/health_check")
+def health_check():
+    global last_health_check
+    last_health_check = datetime.now()
+    return {"status": "ok"}
+
 
 @app.post("/store_chunks_pending/")
 async def store_chunks_pending(chunks: list[Chunk]):
@@ -50,9 +91,6 @@ def delete_chunks(chunks: ChunkHashes):
             os.remove(chunk_path)
     return {"message": "Chunks deleted"}
 
-@app.get("/health_check")
-def health_check():
-    return {"status": "ok"}
 
 @app.get("/get_chunk")
 def get_chunk(chunk_hash: str = Query(..., description="The hash of the chunk to fetch")):
@@ -62,18 +100,6 @@ def get_chunk(chunk_hash: str = Query(..., description="The hash of the chunk to
     with open(chunk_path, "rb") as f:
         chunk_data = f.read()
     return chunk_data
-
-@app.on_event("startup")
-def register_with_leader():
-    try:
-        response = requests.post(f"{LEADER_URL}/register_chunk_server/", params={"url": f"http://host.docker.internal:{PORT}"})
-        if response.status_code == 200:
-            print("Successfully registered with the leader.")
-        else:
-            print("Failed to register with the leader.")
-    except Exception as e:
-        print(f"Error registering with the leader: {e}")
-
 
 if __name__ == "__main__":
     import uvicorn
