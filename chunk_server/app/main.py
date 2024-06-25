@@ -1,3 +1,4 @@
+import socket
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel
 import os
@@ -20,9 +21,11 @@ PORT = int(os.getenv("PORT", 8100))
 HEALTH_CHECK_INTERVAL = 60  # Seconds
 RECONNECT_INTERVAL = 10  # Seconds
 
+
 class Chunk(BaseModel):
     chunk_hash: str
     data: str
+
 
 class ChunkHashes(BaseModel):
     chunks: list[str]
@@ -33,18 +36,31 @@ async def startup_event():
     await register_with_leader()
     asyncio.create_task(check_health())
 
+
 async def check_health():
     global last_health_check
     while True:
         await asyncio.sleep(HEALTH_CHECK_INTERVAL)
-        if datetime.now() - last_health_check > timedelta(seconds=HEALTH_CHECK_INTERVAL):
+        if datetime.now() - last_health_check > timedelta(
+            seconds=HEALTH_CHECK_INTERVAL
+        ):
             print("Health check missed, attempting to reconnect to the leader.")
             await register_with_leader()
 
+
+def get_ip_address():
+    hostname = socket.gethostname()
+    ip_address = socket.gethostbyname(hostname)
+    return ip_address
+
+
 async def register_with_leader():
-     while True:
+    while True:
         try:
-            response = requests.post(f"{LEADER_URL}/register_chunk_server/", params={"url": f"http://host.docker.internal:{PORT}"})
+            response = requests.post(
+                f"{LEADER_URL}/register_chunk_server/",
+                params={"url": f"http://{get_ip_address()}:{PORT}"},
+            )
             if response.status_code == 200:
                 print("Successfully registered with the leader.")
                 global last_health_check
@@ -69,7 +85,7 @@ async def store_chunks_pending(chunks: list[Chunk]):
     for chunk in chunks:
         chunk_path = os.path.join(CHUNK_DIR, f"pending_{chunk.chunk_hash}")
         os.makedirs(os.path.dirname(chunk_path), exist_ok=True)
-        async with aiofiles.open(chunk_path, "w", encoding='utf-8') as f:
+        async with aiofiles.open(chunk_path, "w", encoding="utf-8") as f:
             await f.write(chunk.data)
     return {"message": f"Stored {len(chunks)} chunks in pending mode"}
 
@@ -83,6 +99,7 @@ def finalize_chunks(chunks: ChunkHashes):
             os.rename(pending_chunk_path, final_chunk_path)
     return {"message": "Chunks finalized"}
 
+
 @app.post("/delete_chunks/")
 def delete_chunks(chunks: ChunkHashes):
     for chunk_hash in chunks.chunks:
@@ -93,7 +110,9 @@ def delete_chunks(chunks: ChunkHashes):
 
 
 @app.get("/get_chunk")
-def get_chunk(chunk_hash: str = Query(..., description="The hash of the chunk to fetch")):
+def get_chunk(
+    chunk_hash: str = Query(..., description="The hash of the chunk to fetch")
+):
     chunk_path = os.path.join(CHUNK_DIR, chunk_hash)
     if not os.path.exists(chunk_path):
         raise HTTPException(status_code=404, detail="Chunk not found")
@@ -101,6 +120,8 @@ def get_chunk(chunk_hash: str = Query(..., description="The hash of the chunk to
         chunk_data = f.read()
     return chunk_data
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=PORT)

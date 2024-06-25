@@ -66,6 +66,8 @@ services:
       - leader
     networks:
       - filesystem
+    volumes:
+      - chunk_server_1:/tmp/chunks
   chunk_server_2:
     container_name: chunk_server_2
     build: 
@@ -79,6 +81,8 @@ services:
       - leader
     networks:
       - filesystem
+    volumes:
+      - chunk_server_2:/tmp/chunks
   chunk_server_3:
     container_name: chunk_server_3
     build: 
@@ -92,6 +96,8 @@ services:
       - leader
     networks:
       - filesystem
+    volumes:
+      - chunk_server_3:/tmp/chunks
   chunk_server_4:
     container_name: chunk_server_4
     build: 
@@ -105,6 +111,8 @@ services:
       - leader
     networks:
       - filesystem
+    volumes:
+      - chunk_server_4:/tmp/chunks
   chunk_server_5:
     container_name: chunk_server_5
     build: 
@@ -118,11 +126,18 @@ services:
       - leader
     networks:
       - filesystem
+    volumes:
+      - chunk_server_5:/tmp/chunks
 
 volumes:
   postgres_data:
+  chunk_server_1:
+  chunk_server_2:
+  chunk_server_3:
+  chunk_server_4:
+  chunk_server_5:
 
 networks:
   filesystem:
-    
+
   
