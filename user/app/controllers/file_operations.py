@@ -4,10 +4,11 @@ from typing import List, Dict
 import os
 import aiohttp
 from aiohttp import FormData
-from app.utils.chunk_utils import hash_chunk, get_chunk_server_positions
+from app.utils.chunk_utils import hash_chunk, get_chunk_server_positions, delete_chunks_from_servers
 from app.utils.leader_utils import get_leader_chunk_servers
 import requests
 import hashlib
+import asyncio
 
 router = APIRouter()
 
@@ -60,14 +61,27 @@ async def upload_file(file: UploadFile = File(...), name: str = Form(...), path:
         raise HTTPException(status_code=response.status_code, detail="Error creating temporary name mapping")
 
     # Finalize chunks on the servers
-    async with aiohttp.ClientSession() as session:
-        for chunk_hash, position in chunk_positions:
-            servers = get_chunk_server_positions(chunk_hash, chunk_servers)
-            for server in servers:
-                url = f"{server['url']}/finalize_chunks/"
-                async with session.post(url, json={"chunks": [chunk_hash]}) as response:
-                    if response.status != 200:
-                        raise HTTPException(status_code=response.status, detail=f"Failed to finalize chunk on server {server['url']}")
+    successfully_finalized_chunks = []
+    try:
+        async with aiohttp.ClientSession() as session:
+            for chunk_hash, position in chunk_positions:
+                servers = get_chunk_server_positions(chunk_hash, chunk_servers)
+                for server in servers:
+                    url = f"{server['url']}/finalize_chunks/"
+                    async with session.post(url, json={"chunks": [chunk_hash]}) as response:
+                        if response.status == 200:
+                                successfully_finalized_chunks.append((server['url'], chunk_hash))
+                        else:
+                            raise Exception(f"Failed to finalize chunk on server {server['url']}")
+    except Exception as e:
+    # Rollback finalized chunks if any finalization fails
+        async def rollback():
+            async with aiohttp.ClientSession() as session:
+                await delete_chunks_from_servers(session, chunk_servers, successfully_finalized_chunks)
+                
+        asyncio.create_task(rollback())
+        raise HTTPException(status_code=500, detail=str(e))
+    
 
     # Finalize name mapping on the leader
     response = requests.post(f"{os.getenv('LEADER_URL')}/finalize_namemappings/", params={"full_path": os.path.join(path, name)})
